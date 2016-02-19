@@ -13,6 +13,48 @@ import (
 	// "github.com/kr/pretty"
 )
 
+func (c *Cli) CmdLoginWithPassword(passwd string) error {
+	uri := fmt.Sprintf("%s/rest/auth/1/session", c.endpoint)
+	for true {
+		req, _ := http.NewRequest("GET", uri, nil)
+		user, _ := c.opts["user"].(string)
+
+		req.SetBasicAuth(user, passwd)
+		log.Infof("%s %s", req.Method, req.URL.String())
+		if resp, err := c.makeRequest(req); err != nil {
+			return err
+		} else {
+			out, _ := httputil.DumpResponse(resp, true)
+			log.Debugf("%s", out)
+			if resp.StatusCode == 403 {
+				// probably got this, need to redirect the user to login manually
+				// X-Authentication-Denied-Reason: CAPTCHA_CHALLENGE; login-url=https://jira/login.jsp
+				if reason := resp.Header.Get("X-Authentication-Denied-Reason"); reason != "" {
+					err := fmt.Errorf("Authenticaion Failed: %s", reason)
+					log.Errorf("%s", err)
+					return err
+				}
+				err := fmt.Errorf("Authentication Failed: Unknown Reason")
+				log.Errorf("%s", err)
+				return err
+
+			} else if resp.StatusCode == 200 {
+				// https://confluence.atlassian.com/display/JIRA043/JIRA+REST+API+%28Alpha%29+Tutorial#JIRARESTAPI%28Alpha%29Tutorial-CAPTCHAs
+				// probably bad password, try again
+				if reason := resp.Header.Get("X-Seraph-Loginreason"); reason == "AUTHENTICATION_DENIED" {
+					log.Warning("Authentication Failed: %s", reason)
+					continue
+				}
+			} else {
+				log.Warning("Login failed")
+				continue
+			}
+		}
+		return nil
+	}
+	return nil
+}
+
 func (c *Cli) CmdLogin() error {
 	uri := fmt.Sprintf("%s/rest/auth/1/session", c.endpoint)
 	for true {
